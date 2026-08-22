@@ -1,0 +1,36 @@
+name: Build Android Lite APK
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build-android-lite:
+    name: Build Android Lite APK (Android 6.0.1 / API 23+)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build Lite Release APK
+        run: ./gradlew assembleLiteRelease
+
+      - name: Upload Android Lite APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zhihu-plus-plus-lite-android6
+          path: app/build/outputs/apk/lite/release/*.apk
