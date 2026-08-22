@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - master
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build-android-lite:
     name: Build Android Lite APK (Android 6.0.1 / API 23+)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -34,3 +38,9 @@ jobs:
         with:
           name: zhihu-plus-plus-lite-android6
           path: app/build/outputs/apk/lite/release/*.apk
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: app/build/outputs/apk/lite/release/*.apk
