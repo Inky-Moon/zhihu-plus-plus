@@ -163,7 +163,7 @@ kotlin {
                 implementation("androidx.core:core-ktx:1.19.0")
                 implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.11.0")
                 implementation("androidx.media:media:1.7.1")
-                implementation("androidx.webkit:webkit:1.16.0")
+                implementation("androidx.webkit:webkit:1.11.0")
                 implementation("com.journeyapps:zxing-android-embedded:4.3.0")
                 implementation("com.google.zxing:core:3.5.4")
                 implementation("io.coil-kt.coil3:coil-gif:3.5.0")

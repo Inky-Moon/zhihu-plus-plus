@@ -237,7 +237,7 @@ dependencies {
     //noinspection GradleDependency
     implementation("org.jetbrains.androidx.navigation:navigation-compose:2.9.2")
 
-    implementation("androidx.webkit:webkit:1.16.0")
+    implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     // Compose (core from JetBrains KMP)
     implementation("org.jetbrains.compose.runtime:runtime:$composeVersion")
