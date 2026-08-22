@@ -154,10 +154,7 @@ kotlin {
             implementation("io.ktor:ktor-client-mock:3.5.0")
         }
         androidMain {
-            kotlin.srcDir("src/tiqianMarkdownMain/kotlin")
             dependencies {
-                implementation("org.tiqian:markdown-compose:0.1.0-alpha05")
-                implementation("org.tiqian:math-font-stix:0.1.0-alpha05")
                 implementation("androidx.activity:activity-compose:1.13.0")
                 implementation("androidx.browser:browser:1.10.0")
                 implementation("androidx.core:core-ktx:1.19.0")

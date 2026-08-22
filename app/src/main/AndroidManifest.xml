@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-sdk tools:overrideLibrary="com.gallatinapps.syntaxmp, com.gallatinapps.syntaxmp.tokenizer, com.gallatinapps.syntaxmp.core, com.gallatinapps.syntaxmp.parser, com.gallatinapps, org.tiqian.markdown.compose, org.tiqian.math.font.stix, org.tiqian.markdown, org.tiqian.compose, org.tiqian.compose.material3, org.tiqian.cjk, org.tiqian.ruby, org.tiqian, androidx.webkit, androidx.browser, androidx.media, androidx.core, androidx.activity, androidx.activity.compose, androidx.lifecycle, androidx.lifecycle.livedata, androidx.lifecycle.livedata.core, androidx.lifecycle.viewmodel, androidx.lifecycle.viewmodel.compose, androidx.lifecycle.runtime.compose, androidx.navigation, androidx.navigation.compose, androidx.room, androidx.sqlite, androidx.graphics.path, androidx.graphics, androidx.tracing, androidx.annotation, androidx.profileinstaller, androidx.startup, androidx.emoji2, androidx.customview, androidx.savedstate, com.journeyapps.barcodescanner, com.google.zxing.client.android, com.materialkolor, com.mikepenz.aboutlibraries, me.saket.telephoto, me.saket.telephoto.zoomable, me.saket.telephoto.subsamplingimage, me.saket.telephoto.zoomable.coil3, coil3, coil3.compose, coil3.gif, coil3.network.ktor3, com.fleeksoft.ksoup" />
+
 
     <uses-feature
             android:name="android.hardware.camera"
