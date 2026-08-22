@@ -118,6 +118,8 @@ android {
             manifestPlaceholders["zhihuGitHash"] = gitHash
             if (System.getenv("signingKey") != null) {
                 signingConfig = signingConfigs["env"]
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }

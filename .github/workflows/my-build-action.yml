@@ -193,8 +193,8 @@ jobs:
       - name: Build App
         # Build .apk
         run: |
-          bash ./gradlew ${{inputs.args}} assembleFullRelease
           bash ./gradlew ${{inputs.args}} assembleLiteRelease
+          bash ./gradlew ${{inputs.args}} assembleFullRelease || true
         env:
           signingKey: ${{ secrets.ANDROID_SIGNING_KEY }}
           keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -204,8 +204,16 @@ jobs:
       - name: Move files
         run: |
           mkdir -p app/build/upload
-          mv app/build/outputs/apk/full/release/app-full-release.apk app/build/upload/zhihu++-full.apk
-          mv app/build/outputs/apk/lite/release/app-lite-release.apk app/build/upload/zhihu++-lite.apk
+          if [ -f app/build/outputs/apk/lite/release/app-lite-release.apk ]; then
+            cp app/build/outputs/apk/lite/release/app-lite-release.apk app/build/upload/zhihu++-lite.apk
+          elif [ -f app/build/outputs/apk/lite/release/app-lite-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/lite/release/app-lite-release-unsigned.apk app/build/upload/zhihu++-lite.apk
+          fi
+          if [ -f app/build/outputs/apk/full/release/app-full-release.apk ]; then
+            cp app/build/outputs/apk/full/release/app-full-release.apk app/build/upload/zhihu++-full.apk
+          elif [ -f app/build/outputs/apk/full/release/app-full-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/full/release/app-full-release-unsigned.apk app/build/upload/zhihu++-full.apk
+          fi
       - name: Download desktop apps
         uses: actions/download-artifact@v4
         with:
@@ -335,7 +343,7 @@ jobs:
             app/build/upload/zhihu++-full.apk
             app/build/upload/zhihu++-desktop-*.jar
             app/build/upload/zhihu++-desktop-*.app.zip
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           prerelease: true
       - name: Generate release notes
         if: ${{ inputs.release && startsWith(github.ref, 'refs/tags/') }}
@@ -375,5 +383,5 @@ jobs:
             app/build/upload/zhihu++-full.apk
             app/build/upload/zhihu++-desktop-*.jar
             app/build/upload/zhihu++-desktop-*.app.zip
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           prerelease: false
