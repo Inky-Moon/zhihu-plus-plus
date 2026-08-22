@@ -94,7 +94,7 @@ kotlin {
     androidLibrary {
         namespace = "com.github.zly2006.zhihu.shared"
         compileSdk = 37
-        minSdk = 27
+        minSdk = 23
 
         compilerOptions {
             jvmTarget = JvmTarget.JVM_17

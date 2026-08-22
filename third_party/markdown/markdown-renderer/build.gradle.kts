@@ -34,7 +34,7 @@ kotlin {
     androidLibrary {
         namespace = "com.hrm.markdown.renderer"
         compileSdk = 37
-        minSdk = 27
+        minSdk = 23
 
         compilerOptions {
             jvmTarget = JvmTarget.JVM_17

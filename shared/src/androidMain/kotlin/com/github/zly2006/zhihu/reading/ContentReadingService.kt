@@ -29,6 +29,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
@@ -72,7 +73,7 @@ class ContentReadingService : Service() {
             .apply { setReferenceCounted(false) }
     }
     private lateinit var mediaSession: MediaSessionCompat
-    private lateinit var audioFocusRequest: AudioFocusRequest
+    private var audioFocusRequest: AudioFocusRequest? = null
 
     private var textToSpeech: TextToSpeech? = null
     private var ttsReady = false
@@ -813,47 +814,74 @@ class ContentReadingService : Service() {
         }
     }
 
+    private var audioFocusChangeListener: AudioManager.OnAudioFocusChangeListener? = null
+
     private fun createAudioFocusRequest() {
-        val attributes = AudioAttributes
-            .Builder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .build()
-        audioFocusRequest = AudioFocusRequest
-            .Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(attributes)
-            .setOnAudioFocusChangeListener { focusChange ->
-                serviceScope.launch {
-                    when (focusChange) {
-                        AudioManager.AUDIOFOCUS_GAIN -> {
-                            val shouldResume = resumeOnFocusGain
-                            resumeOnFocusGain = false
-                            if (shouldResume) {
-                                resumePlayback()
-                            }
-                        }
-                        AudioManager.AUDIOFOCUS_LOSS -> {
-                            resumeOnFocusGain = false
-                            pausePlayback(abandonAudioFocus = false)
-                        }
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK,
-                        -> {
-                            val shouldResume = playWhenReady && playbackStatus in PLAYING_STATUSES
-                            pausePlayback(
-                                abandonAudioFocus = false,
-                                resumeWhenFocusGained = shouldResume,
-                            )
+        val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            serviceScope.launch {
+                when (focusChange) {
+                    AudioManager.AUDIOFOCUS_GAIN -> {
+                        val shouldResume = resumeOnFocusGain
+                        resumeOnFocusGain = false
+                        if (shouldResume) {
+                            resumePlayback()
                         }
                     }
+                    AudioManager.AUDIOFOCUS_LOSS -> {
+                        resumeOnFocusGain = false
+                        pausePlayback(abandonAudioFocus = false)
+                    }
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK,
+                    -> {
+                        val shouldResume = playWhenReady && playbackStatus in PLAYING_STATUSES
+                        pausePlayback(
+                            abandonAudioFocus = false,
+                            resumeWhenFocusGained = shouldResume,
+                        )
+                    }
                 }
-            }.build()
+            }
+        }
+        audioFocusChangeListener = focusChangeListener
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val attributes = AudioAttributes
+                .Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            audioFocusRequest = AudioFocusRequest
+                .Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attributes)
+                .setOnAudioFocusChangeListener(focusChangeListener)
+                .build()
+        }
     }
 
-    private fun requestAudioFocus(): Boolean = audioManager.requestAudioFocus(audioFocusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    private fun requestAudioFocus(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let {
+                audioManager.requestAudioFocus(it) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } ?: false
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                audioFocusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN,
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
 
     private fun abandonAudioFocus() {
-        runCatching { audioManager.abandonAudioFocusRequest(audioFocusRequest) }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(audioFocusChangeListener)
+            }
+        }
     }
 
     private fun acquireWakeLock() {
@@ -1035,15 +1063,17 @@ class ContentReadingService : Service() {
     }
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            NOTIFICATION_CHANNEL_ID,
-            "内容朗读",
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = "连续朗读的播放控制"
-            setShowBadge(false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "内容朗读",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "连续朗读的播放控制"
+                setShowBadge(false)
+            }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     companion object {

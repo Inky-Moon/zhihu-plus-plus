@@ -31,7 +31,7 @@ kotlin {
     androidLibrary {
         namespace = "com.hrm.codehigh.parser"
         compileSdk = 37
-        minSdk = 27
+        minSdk = 23
         compilerOptions.jvmTarget = JvmTarget.JVM_17
     }
     jvm {
