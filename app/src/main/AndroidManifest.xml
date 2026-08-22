@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-sdk tools:overrideLibrary="androidx.webkit, org.tiqian.markdown.compose, org.tiqian.math.font.stix, org.tiqian.markdown, org.tiqian.compose, org.tiqian, androidx.browser, androidx.media, androidx.core, androidx.activity, androidx.lifecycle, com.journeyapps.barcodescanner" />
+    <uses-sdk tools:overrideLibrary="androidx.webkit, org.tiqian.markdown.compose, org.tiqian.math.font.stix, org.tiqian.markdown, org.tiqian.compose, org.tiqian, androidx.browser, androidx.media, androidx.core, androidx.activity, androidx.activity.compose, androidx.lifecycle, androidx.lifecycle.livedata, androidx.lifecycle.viewmodel, androidx.navigation, androidx.room, androidx.sqlite, androidx.graphics.path, com.journeyapps.barcodescanner, com.google.zxing.client.android, com.materialkolor, com.mikepenz.aboutlibraries, me.saket.telephoto.zoomable, me.saket.telephoto.subsamplingimage, me.saket.telephoto.zoomable.coil3, coil3, coil3.compose, coil3.gif, coil3.network.ktor3, com.fleeksoft.ksoup" />
 
     <uses-feature
             android:name="android.hardware.camera"
