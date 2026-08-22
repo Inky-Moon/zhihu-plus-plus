@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-sdk tools:overrideLibrary="org.tiqian.markdown.compose, org.tiqian.math.font.stix, org.tiqian.markdown, org.tiqian.compose, org.tiqian" />
+    <uses-sdk tools:overrideLibrary="androidx.webkit, org.tiqian.markdown.compose, org.tiqian.math.font.stix, org.tiqian.markdown, org.tiqian.compose, org.tiqian, androidx.browser, androidx.media, androidx.core, androidx.activity, androidx.lifecycle, com.journeyapps.barcodescanner" />
 
     <uses-feature
             android:name="android.hardware.camera"
