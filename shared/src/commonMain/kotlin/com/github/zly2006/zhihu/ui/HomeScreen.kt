@@ -89,6 +89,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -110,6 +111,7 @@ import com.github.zly2006.zhihu.navigation.Notification
 import com.github.zly2006.zhihu.navigation.Pin
 import com.github.zly2006.zhihu.navigation.Search
 import com.github.zly2006.zhihu.navigation.WritePin
+import com.github.zly2006.zhihu.navigation.requestLoginNavigation
 import com.github.zly2006.zhihu.notification.HOME_NOTIFICATION_ACTION_OPEN_ANSWER
 import com.github.zly2006.zhihu.notification.HOME_NOTIFICATION_ACTION_OPEN_ARTICLE
 import com.github.zly2006.zhihu.notification.HOME_NOTIFICATION_ACTION_OPEN_PIN
@@ -143,7 +145,7 @@ import com.github.zly2006.zhihu.ui.components.feedKeywordExtractionAvailable
 import com.github.zly2006.zhihu.ui.subscreens.DEFAULT_FAB_OPACITY
 import com.github.zly2006.zhihu.ui.subscreens.PREF_FAB_OPACITY
 import com.github.zly2006.zhihu.ui.subscreens.SystemUpdateState
-import com.github.zly2006.zhihu.ui.subscreens.rememberSystemUpdateRuntime
+import com.github.zly2006.zhihu.ui.subscreens.rememberSystemUpdateState
 import com.github.zly2006.zhihu.ui.topLevelReselectAction
 import com.github.zly2006.zhihu.util.Log
 import com.github.zly2006.zhihu.viewmodel.QUALITY_FILTER_MODE_PREFERENCE_KEY
@@ -181,6 +183,8 @@ const val HOME_WRITE_QUESTION_BUTTON_TAG = "home_write_question_button"
 const val HOME_WRITE_ANSWER_BUTTON_TAG = "home_write_answer_button"
 const val HOME_WRITE_PIN_BUTTON_TAG = "home_write_pin_button"
 const val HOME_NOTIFICATION_BUTTON_TAG = "home_notification_button"
+const val HOME_NOTIFICATION_BUTTON_CONTENT_TAG = "home_notification_button_content"
+const val HOME_NOTIFICATION_BADGE_TAG = "home_notification_badge"
 const val HOME_ACCOUNT_BUTTON_TAG = "home_account_button"
 const val HOME_FEED_LIST_TAG = "home_feed_list"
 const val HOME_REFRESH_BUTTON_TAG = "home_refresh_button"
@@ -206,6 +210,7 @@ fun homePinAnnouncementReadKey(pinId: Long): String = "readHomePinAnnouncement_$
 fun HomeScreen(
     scrollToTopTrigger: Int,
     innerPadding: PaddingValues,
+    showTopActions: Boolean = true,
 ) {
     val readingPlayerOverlayPadding = LocalReadingPlayerOverlayPadding.current
     val navigator = LocalNavigator.current
@@ -245,13 +250,13 @@ fun HomeScreen(
             title = { Text("Cookie 不完整") },
             text = { Text("当前登录信息缺少必要的 Cookie d_c0，请重新登录。") },
             confirmButton = {
-                TextButton(onClick = { paginationEnvironment.requestLogin() }) {
+                TextButton(onClick = ::requestLoginNavigation) {
                     Text("重新登录")
                 }
             },
         )
     }
-    val updateState by rememberSystemUpdateRuntime().state.collectAsState()
+    val updateState by rememberSystemUpdateState().collectAsState()
     val updateAnnouncement = updateState as? SystemUpdateState.UpdateAvailable
     val versionName = rememberAppVersionInfo().substringBefore(' ').takeIf { it.firstOrNull()?.isDigit() == true }
     val onlineNotificationRepository = remember(settings) {
@@ -335,9 +340,7 @@ fun HomeScreen(
         if (!account.login &&
             settings.getBoolean("loginForRecommendation", true)
         ) {
-            if (!paginationEnvironment.requestLogin()) {
-                userMessages.showShortMessage("当前平台暂不支持登录")
-            }
+            requestLoginNavigation()
         } else if (viewModel.displayItems.isEmpty()) {
             val cachedItems = if (autoRefreshOnStartup) {
                 emptyList()
@@ -430,6 +433,9 @@ fun HomeScreen(
                     .blur(createMenuBlurRadius)
             },
             topBar = {
+                if (!showTopActions) {
+                    return@Scaffold
+                }
                 if (duo3HomeAccount) {
                     Box {
                         Surface(
@@ -563,22 +569,37 @@ fun HomeScreen(
                                 }
                             }
                             Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(
-                                onClick = { navigator.onNavigate(Notification) },
-                                modifier = Modifier.testTag(HOME_NOTIFICATION_BUTTON_TAG),
-                            ) {
-                                BadgedBox(
-                                    badge = {
-                                        if (showUnreadBadge && unreadCount > 0) {
-                                            Badge { Text("$unreadCount") }
-                                        }
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag(HOME_NOTIFICATION_BUTTON_TAG)
+                                    .clickable(role = Role.Button) {
+                                        navigator.onNavigate(Notification)
                                     },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                // 点击盒与内容盒分离，避免 IconButton 的裁剪边界截掉 BadgedBox 的 badge。
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .testTag(HOME_NOTIFICATION_BUTTON_CONTENT_TAG),
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(
-                                        Icons.Default.Notifications,
-                                        contentDescription = "通知",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                    )
+                                    BadgedBox(
+                                        badge = {
+                                            if (showUnreadBadge && unreadCount > 0) {
+                                                Badge(modifier = Modifier.testTag(HOME_NOTIFICATION_BADGE_TAG)) {
+                                                    Text("$unreadCount")
+                                                }
+                                            }
+                                        },
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Notifications,
+                                            contentDescription = "通知",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -656,7 +677,7 @@ fun HomeScreen(
                                                 accept.value
                                                     ?.jsonPrimitive
                                                     ?.contentOrNull
-                                                    ?.let(openExternalUrl)
+                                                    ?.let(openExternalUrl::invoke)
                                             }
                                             HOME_NOTIFICATION_ACTION_OPEN_UPDATE_SETTINGS -> {
                                                 navigator.onNavigate(Account.SystemAndUpdateSettings())
