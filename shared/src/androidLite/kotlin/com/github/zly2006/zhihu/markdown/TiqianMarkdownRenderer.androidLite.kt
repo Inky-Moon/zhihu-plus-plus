@@ -41,7 +41,7 @@ internal actual fun PlatformTiqianMarkdown(
     header: (@Composable () -> Unit)?,
     footer: (@Composable () -> Unit)?,
 ) {
-    error("Tiqian Markdown renderer is unavailable on Native")
+    error("Tiqian Markdown renderer is unavailable in Android Lite")
 }
 
 @Composable

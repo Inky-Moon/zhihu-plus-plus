@@ -31,6 +31,8 @@ expect val isNative: Boolean
 
 expect val isAigcVoteSupported: Boolean
 
+expect val isLiteVariant: Boolean
+
 expect val isBlocklistNlpSupported: Boolean
 
 expect val isSentenceSimilaritySupported: Boolean
@@ -38,6 +40,10 @@ expect val isSentenceSimilaritySupported: Boolean
 expect val isArticleHtmlExportSupported: Boolean
 
 expect val isArticleImageExportSupported: Boolean
+
+expect val isPageTurnSupported: Boolean
+
+expect val isAnswerSwipeSupported: Boolean
 
 enum class UserMessageDuration {
     Short,
@@ -183,6 +189,3 @@ expect fun PlatformPredictiveBackHandler(
     onCancel: () -> Unit,
     onBack: () -> Unit,
 )
-
-@Composable
-expect fun rememberIsLiteVariant(): Boolean

@@ -68,13 +68,14 @@ import com.github.zly2006.zhihu.navigation.LocalNavigator
 import com.github.zly2006.zhihu.navigation.SentenceSimilarityTest
 import com.github.zly2006.zhihu.notification.HOME_NOTIFICATION_READ_UUIDS_PREFERENCE_KEY
 import com.github.zly2006.zhihu.platform.isSentenceSimilaritySupported
-import com.github.zly2006.zhihu.platform.rememberIsLiteVariant
 import com.github.zly2006.zhihu.platform.rememberPlainTextClipboard
 import com.github.zly2006.zhihu.platform.rememberSettingsStore
 import com.github.zly2006.zhihu.platform.rememberUserMessageSink
 import com.github.zly2006.zhihu.ui.HOME_PIN_ANNOUNCEMENT_READ_KEY_PREFIX
 import com.github.zly2006.zhihu.ui.TtsState
 import com.github.zly2006.zhihu.ui.components.SettingItemOverall
+import com.github.zly2006.zhihu.ui.components.pageTurnViewportWithGuide
+import com.github.zly2006.zhihu.ui.components.rememberPageTurnTarget
 import com.github.zly2006.zhihu.viewmodel.rememberPaginationEnvironment
 import kotlinx.coroutines.launch
 
@@ -105,6 +106,11 @@ fun DeveloperSettingsScreen() {
     }
     var showCookieDialog by remember { mutableStateOf(false) }
     var showSignedRequestDialog by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val pageTurnTarget = rememberPageTurnTarget(
+        scrollState = scrollState,
+        enabled = !showCookieDialog && !showSignedRequestDialog,
+    )
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -137,7 +143,8 @@ fun DeveloperSettingsScreen() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .pageTurnViewportWithGuide(pageTurnTarget)
+                .verticalScroll(scrollState)
                 .padding(innerPadding)
                 .padding(16.dp),
         ) {
@@ -184,7 +191,7 @@ fun DeveloperSettingsScreen() {
 
                 Button(onClick = { showSignedRequestDialog = true }) { Text("签名请求") }
 
-                if (isSentenceSimilaritySupported && !rememberIsLiteVariant()) {
+                if (isSentenceSimilaritySupported) {
                     Button(
                         modifier = Modifier.testTag(DEVELOPER_SETTINGS_SENTENCE_SIMILARITY_TAG),
                         onClick = {

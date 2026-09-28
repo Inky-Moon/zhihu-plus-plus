@@ -19,13 +19,13 @@ package com.github.zly2006.zhihu
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
 import android.view.InputDevice
 import android.view.MotionEvent
 import androidx.compose.foundation.ComposeFoundationFlags
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
@@ -37,10 +37,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
@@ -95,6 +95,11 @@ import com.github.zly2006.zhihu.ui.AnswerDoubleTapAction
 import com.github.zly2006.zhihu.ui.ArticleScreen
 import com.github.zly2006.zhihu.ui.PREFERENCE_NAME
 import com.github.zly2006.zhihu.ui.article.ArticleActionsMenu
+import com.github.zly2006.zhihu.ui.components.LocalPageTurnDispatcher
+import com.github.zly2006.zhihu.ui.components.PageTurnCommand
+import com.github.zly2006.zhihu.ui.components.PageTurnDispatcher
+import com.github.zly2006.zhihu.ui.components.PageTurnFab
+import com.github.zly2006.zhihu.ui.subscreens.PREF_SHOW_PAGE_TURN_FAB
 import com.github.zly2006.zhihu.viewmodel.ArticleViewModel
 import com.github.zly2006.zhihu.viewmodel.ZhihuApiEnvironment
 import com.github.zly2006.zhihu.viewmodel.sharedArticleAnswerSwitchState
@@ -107,8 +112,6 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
-import java.io.FileOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -216,6 +219,63 @@ class ArticleScreenInstrumentedTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("更多选项").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("复制链接").assertIsDisplayed()
+    }
+
+    /**
+     * Contract: https://github.com/zly2006/zhihu-plus-plus/issues/630
+     * Introduced by: https://github.com/zly2006/zhihu-plus-plus/pull/728
+     * First Page Down collapses the article title without scrolling the body; the second scrolls the body.
+     */
+    @Test
+    fun pageTurnControlsScrollTheArticle() {
+        composeRule.activity
+            .getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_SHOW_PAGE_TURN_FAB, true)
+            .commit()
+        val dispatcher = PageTurnDispatcher()
+        setArticleScreen(dispatcher)
+
+        composeRule.onNodeWithContentDescription("下翻页").assertIsDisplayed()
+        val scrollContainer = composeRule.onNode(
+            SemanticsMatcher("has vertical scroll axis") { node ->
+                node.config.contains(SemanticsProperties.VerticalScrollAxisRange)
+            },
+        )
+        val initialValue = scrollContainer
+            .fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange]
+            .value()
+        val title = composeRule.onNodeWithText("离线 Article 标题")
+        val toolbarActionBottom = composeRule
+            .onNodeWithContentDescription("更多选项")
+            .fetchSemanticsNode()
+            .boundsInRoot
+            .bottom
+        assertTrue(title.fetchSemanticsNode().boundsInRoot.bottom > toolbarActionBottom)
+
+        assertTrue(dispatcher.dispatch(PageTurnCommand.PageDown))
+        composeRule.waitUntil(5_000) {
+            title.fetchSemanticsNode().boundsInRoot.bottom <= toolbarActionBottom
+        }
+        composeRule.waitForIdle()
+        assertEquals(
+            initialValue.toDouble(),
+            scrollContainer
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+                .value()
+                .toDouble(),
+            0.5,
+        )
+
+        assertTrue(dispatcher.dispatch(PageTurnCommand.PageDown))
+        composeRule.waitUntil(5_000) {
+            scrollContainer
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+                .value() > initialValue
+        }
     }
 
     /**
@@ -918,14 +978,6 @@ class ArticleScreenInstrumentedTest {
         val image = composeRule
             .onNodeWithTag("wrapped-highlight-article")
             .captureToImage()
-        val output = File(
-            requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)),
-            "segment-highlight-wrapped.png",
-        )
-        FileOutputStream(output).use { stream ->
-            image.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream)
-        }
-
         val pixels = image.toPixelMap()
         for (line in startLine..endLine) {
             val top = (layout.getLineBottom(line) - 6f).toInt().coerceAtLeast(0)
@@ -937,7 +989,7 @@ class ArticleScreenInstrumentedTest {
                 }
             }
             assertTrue(
-                "Highlighted visual line $line must contain visible dash pixels; found $magentaPixels. Screenshot: ${output.absolutePath}",
+                "Highlighted visual line $line must contain visible dash pixels; found $magentaPixels",
                 magentaPixels >= 4,
             )
         }
@@ -1038,13 +1090,6 @@ class ArticleScreenInstrumentedTest {
             val selectionImage = composeRule
                 .onNodeWithTag("multiline-selection-article")
                 .captureToImage()
-            val screenshot = File(
-                requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)),
-                "markdown-native-selection.png",
-            )
-            FileOutputStream(screenshot).use { stream ->
-                selectionImage.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream)
-            }
             val pixels = selectionImage.toPixelMap()
             val highlightedRows = (0 until pixels.height).count { y ->
                 var selectedPixels = 0
@@ -1058,8 +1103,7 @@ class ArticleScreenInstrumentedTest {
             }
             Log.i("MarkdownSelection", "multilineSelectionHighlightedRows=$highlightedRows")
             assertTrue(
-                "Select-all highlight only covered $highlightedRows pixel rows; a wrapped paragraph must highlight every line. " +
-                    "Screenshot: ${screenshot.absolutePath}",
+                "Select-all highlight only covered $highlightedRows pixel rows; a wrapped paragraph must highlight every line.",
                 highlightedRows >= 180,
             )
         } finally {
@@ -1522,7 +1566,7 @@ class ArticleScreenInstrumentedTest {
         assertTrue(preferences.getFloat("buttonSkipAnswer-x", Float.NaN) > rootWidth / 2)
     }
 
-    private fun setArticleScreen() {
+    private fun setArticleScreen(pageTurnDispatcher: PageTurnDispatcher? = null) {
         val viewModel = ArticleViewModel(
             article = ARTICLE,
             httpClient = null,
@@ -1547,10 +1591,22 @@ class ArticleScreenInstrumentedTest {
                 modifier = androidx.compose.ui.Modifier
                     .fillMaxSize(),
             ) { _ ->
-                ArticleScreen(
-                    article = ARTICLE,
-                    viewModel = viewModel,
-                )
+                if (pageTurnDispatcher == null) {
+                    ArticleScreen(
+                        article = ARTICLE,
+                        viewModel = viewModel,
+                    )
+                } else {
+                    CompositionLocalProvider(LocalPageTurnDispatcher provides pageTurnDispatcher) {
+                        Box(Modifier.fillMaxSize()) {
+                            ArticleScreen(
+                                article = ARTICLE,
+                                viewModel = viewModel,
+                            )
+                            PageTurnFab(dispatcher = pageTurnDispatcher)
+                        }
+                    }
+                }
             }
         }
     }

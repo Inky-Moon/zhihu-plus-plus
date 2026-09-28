@@ -17,6 +17,7 @@ Treat emulator time as a recurring maintenance cost. Keep it only where a real p
 2. Every retained `@Test` must have verified issue and fixing/introducing PR links next to it. Never invent provenance.
 3. Keep test cleanup out of feature and bug-fix PRs. Use a dedicated branch, worktree, commit, and PR.
 4. Do not add a permanent instrument test merely to confirm a low-risk visual choice once. Build the APK and capture a real before/after screenshot instead.
+   A temporary instrument test may capture a screenshot for review. After retrieving the image, restore the test source to its original state before committing or submitting a PR. Permanent tests may capture pixels in memory only when those pixels support a meaningful visual assertion; do not retain screenshot file output or a screenshot-only assertion.
 5. Do not run the complete instrument suite locally unless the user explicitly asks. Prefer compilation, the smallest relevant test, or GitHub CI.
 6. Flakiness, runtime, or inconvenience never justify deleting a proven regression test. Repair its synchronization, fixture, or execution boundary.
 7. A test must assert user-observable behavior or a proven regression, not copy an implementation constant list into assertions. Delete tests that only restate the current source shape without an independent contract; validate the behavior through real interaction, build, or focused regression evidence instead.
@@ -122,6 +123,10 @@ After edits:
 6. Let GitHub CI run the complete suite and follow it to a terminal result when CI is the acceptance boundary.
 
 Do not describe an in-progress check as green or a compiled test as behaviorally executed.
+
+Removing or migrating the test that emitted the visible ANR/error does not by itself fix a stalled shard. Inspect the shard's last `START`/`PASS`, active workflow step, and runner/process teardown state to distinguish a test-body hang from Activity focus cleanup or runner-shell deadlock, then require the replacement run to reach a terminal result.
+
+When a regression contract does not depend on Android framework or device behavior, migrate it to the cheapest common/JVM layer and remove the redundant instrument test. Preserve historical device regressions unless equivalent coverage is demonstrated; never delete them merely to make the shard terminate.
 
 ### 6. Publish an auditable cleanup PR
 

@@ -82,6 +82,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -92,8 +93,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.github.zly2006.zhihu.data.DataHolder
@@ -101,8 +104,8 @@ import com.github.zly2006.zhihu.data.Feed
 import com.github.zly2006.zhihu.data.MOBILE_NOTIFICATION_MESSAGE_URL
 import com.github.zly2006.zhihu.data.MobileNotificationMessageOverview
 import com.github.zly2006.zhihu.data.RecommendationMode
-import com.github.zly2006.zhihu.data.ZhihuJson
 import com.github.zly2006.zhihu.data.target
+import com.github.zly2006.zhihu.filter.RemoteHistorySync
 import com.github.zly2006.zhihu.navigation.Account
 import com.github.zly2006.zhihu.navigation.Article
 import com.github.zly2006.zhihu.navigation.ArticleType
@@ -123,10 +126,10 @@ import com.github.zly2006.zhihu.notification.HOME_NOTIFICATION_REFRESH_INTERVAL_
 import com.github.zly2006.zhihu.notification.OnlineHomeNotification
 import com.github.zly2006.zhihu.notification.OnlineHomeNotificationRepository
 import com.github.zly2006.zhihu.notification.rememberNotificationSettingsStore
+import com.github.zly2006.zhihu.platform.SettingsStore
 import com.github.zly2006.zhihu.platform.UserMessageDuration
 import com.github.zly2006.zhihu.platform.rememberAppPrivateDirectory
 import com.github.zly2006.zhihu.platform.rememberExternalUrlOpener
-import com.github.zly2006.zhihu.platform.rememberIsLiteVariant
 import com.github.zly2006.zhihu.platform.rememberSettingsStore
 import com.github.zly2006.zhihu.platform.rememberUserMessageSink
 import com.github.zly2006.zhihu.platform.rememberWebViewUrlOpener
@@ -144,12 +147,14 @@ import com.github.zly2006.zhihu.ui.components.MyModalBottomSheet
 import com.github.zly2006.zhihu.ui.components.PaginatedList
 import com.github.zly2006.zhihu.ui.components.ProgressIndicatorFooter
 import com.github.zly2006.zhihu.ui.components.feedKeywordExtractionAvailable
+import com.github.zly2006.zhihu.ui.components.pageTurnViewportWithGuide
+import com.github.zly2006.zhihu.ui.components.rememberPageTurnTarget
 import com.github.zly2006.zhihu.ui.subscreens.DEFAULT_FAB_OPACITY
 import com.github.zly2006.zhihu.ui.subscreens.PREF_FAB_OPACITY
 import com.github.zly2006.zhihu.ui.subscreens.SystemUpdateState
 import com.github.zly2006.zhihu.ui.subscreens.rememberSystemUpdateState
-import com.github.zly2006.zhihu.ui.topLevelReselectAction
 import com.github.zly2006.zhihu.util.Log
+import com.github.zly2006.zhihu.util.json
 import com.github.zly2006.zhihu.viewmodel.QUALITY_FILTER_MODE_PREFERENCE_KEY
 import com.github.zly2006.zhihu.viewmodel.QualityFilterMode
 import com.github.zly2006.zhihu.viewmodel.feed.BaseFeedViewModel
@@ -159,11 +164,12 @@ import com.github.zly2006.zhihu.viewmodel.local.LocalHomeFeedViewModel
 import com.github.zly2006.zhihu.viewmodel.rememberPaginationEnvironment
 import com.github.zly2006.zhihu.viewmodel.za.AndroidHomeFeedViewModel
 import com.github.zly2006.zhihu.viewmodel.za.MixedHomeFeedViewModel
-import io.ktor.client.call.body
 import io.ktor.client.request.get
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
@@ -171,7 +177,6 @@ import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.readString
 import kotlinx.io.writeString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -205,6 +210,17 @@ fun homeOnlineNotificationTag(uuid: String): String = "$HOME_ONLINE_NOTIFICATION
 
 fun homePinAnnouncementReadKey(pinId: Long): String = "$HOME_PIN_ANNOUNCEMENT_READ_KEY_PREFIX$pinId"
 
+// Pager can dispose this page while its feed ViewModels survive. Keep the header rows and
+// synchronization owner alive too, so restoring a saved list index does not shift the visible card.
+private class HomeScreenState(
+    settings: SettingsStore,
+) : ViewModel() {
+    val remoteHistory = RemoteHistorySync(settings)
+    val onlineNotifications = mutableStateOf(emptyList<OnlineHomeNotification>())
+    val authorPinAnnouncements = mutableStateOf(emptyList<HomePinAnnouncement>())
+    val dismissedUpdateVersion = mutableStateOf<String?>(null)
+}
+
 /**
  * 首页信息流页面。
  *
@@ -218,11 +234,15 @@ fun HomeScreen(
     scrollToTopTrigger: Int,
     innerPadding: PaddingValues,
     showTopActions: Boolean = true,
+    isActive: Boolean = true,
 ) {
     val readingPlayerOverlayPadding = LocalReadingPlayerOverlayPadding.current
     val navigator = LocalNavigator.current
-    val paginationEnvironment = rememberPaginationEnvironment(allowGuestAccess = true)
+    val baseEnvironment = rememberPaginationEnvironment(allowGuestAccess = true)
     val settings = rememberSettingsStore()
+    val homeState: HomeScreenState = viewModel { HomeScreenState(settings) }
+    val remoteHistory = homeState.remoteHistory
+    val paginationEnvironment = remember(baseEnvironment, remoteHistory) { remoteHistory.feedEnvironment(baseEnvironment) }
     val appPrivateDirectory = rememberAppPrivateDirectory()
     val notificationSettings = rememberNotificationSettingsStore()
     val userMessages = rememberUserMessageSink()
@@ -270,9 +290,8 @@ fun HomeScreen(
     val onlineNotificationRepository = remember(settings) {
         OnlineHomeNotificationRepository(settings)
     }
-    var onlineNotifications by remember { mutableStateOf(emptyList<OnlineHomeNotification>()) }
+    var onlineNotifications by homeState.onlineNotifications
     val isDebuggable = rememberHomeIsDebuggable()
-    val isLiteVariant = rememberIsLiteVariant()
     val viewModel: BaseFeedViewModel = when (currentRecommendationMode) {
         RecommendationMode.WEB -> viewModel { HomeFeedViewModel() }
         RecommendationMode.ANDROID -> viewModel { AndroidHomeFeedViewModel() }
@@ -286,8 +305,8 @@ fun HomeScreen(
         items = viewModel.displayItems,
     )
 
-    var dismissedUpdateVersion by remember { mutableStateOf<String?>(null) }
-    var authorPinAnnouncements by remember { mutableStateOf(emptyList<HomePinAnnouncement>()) }
+    var dismissedUpdateVersion by homeState.dismissedUpdateVersion
+    var authorPinAnnouncements by homeState.authorPinAnnouncements
 
     val listState = rememberLazyListState()
     var cachedScrollToTopTrigger by remember { mutableIntStateOf(scrollToTopTrigger) }
@@ -311,8 +330,7 @@ fun HomeScreen(
             unreadCount = paginationEnvironment
                 .mobileHomeFeedHttpClient()
                 .get("$MOBILE_NOTIFICATION_MESSAGE_URL?limit=20")
-                .body<JsonObject>()
-                .let { ZhihuJson.decodeJson<MobileNotificationMessageOverview>(it) }
+                .json<MobileNotificationMessageOverview>()
                 .totalUnreadCount
         } catch (_: Exception) {
             // 忽略错误
@@ -344,34 +362,71 @@ fun HomeScreen(
         }
     }
 
-    // 初始加载
-    LaunchedEffect(currentRecommendationMode, account.login, autoRefreshOnStartup) {
-        if (!account.login &&
-            settings.getBoolean("loginForRecommendation", true)
-        ) {
-            requestLoginNavigation()
-        } else if (viewModel.displayItems.isEmpty()) {
-            val cachedItems = if (autoRefreshOnStartup) {
-                emptyList()
-            } else {
-                withContext(Dispatchers.Default) {
-                    runCatching {
-                        if (SystemFileSystem.exists(startupCacheFile)) {
-                            SystemFileSystem.source(startupCacheFile).buffered().use { source ->
-                                decodeHomeFeedStartupSnapshot(source.readString())
+    LaunchedEffect(lifecycleOwner, currentRecommendationMode, account.login, account.id, autoRefreshOnStartup, isActive) {
+        if (!isActive) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            if (account.login &&
+                account.hasRequiredCookie &&
+                settings.getBoolean("enableContentFilter", true) &&
+                !settings.getBoolean("reverseBlock", false)
+            ) {
+                remoteHistory.start(homeState.viewModelScope, baseEnvironment)
+            }
+            if (!account.login && settings.getBoolean("loginForRecommendation", true)) {
+                requestLoginNavigation()
+            } else if (viewModel.displayItems.isEmpty()) {
+                val cachedItems = if (autoRefreshOnStartup) {
+                    emptyList()
+                } else {
+                    withContext(Dispatchers.Default) {
+                        runCatching {
+                            if (SystemFileSystem.exists(startupCacheFile)) {
+                                SystemFileSystem.source(startupCacheFile).buffered().use { source ->
+                                    decodeHomeFeedStartupSnapshot(source.readString())
+                                }
+                            } else {
+                                emptyList()
                             }
-                        } else {
-                            emptyList()
-                        }
-                    }.getOrDefault(emptyList())
+                        }.getOrDefault(emptyList())
+                    }
+                }
+                if (cachedItems.isNotEmpty()) {
+                    remoteHistory.awaitRecentPage()
+                    val unreadCachedItems = remoteHistory.filterRemoteReads(cachedItems)
+                    if (unreadCachedItems.isEmpty()) {
+                        viewModel.refresh(paginationEnvironment)
+                    } else {
+                        viewModel.addDisplayItems(unreadCachedItems)
+                    }
+                } else {
+                    viewModel.refresh(paginationEnvironment)
                 }
             }
-            if (viewModel.displayItems.isEmpty() && cachedItems.isNotEmpty()) {
-                viewModel.addDisplayItems(cachedItems)
-            } else if (viewModel.displayItems.isEmpty()) {
-                // 只在第一次加载时刷新，这样可以避免在返回时刷新
-                viewModel.refresh(paginationEnvironment)
+        }
+    }
+
+    val historyRevision by remoteHistory.importedRevision.collectAsState()
+    LaunchedEffect(remoteHistory, viewModel, historyRevision, isActive) {
+        if (!isActive) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.isNotEmpty() }.first { it }
+        snapshotFlow { viewModel.displayItems.toList() }.collectLatest { items ->
+            // Keep cards already reached by the user stable; only prune the unseen tail in place.
+            val visibleKeys = listState.layoutInfo.visibleItemsInfo
+                .map { it.key }
+                .toSet()
+            val lastVisible = items.indexOfLast { it.stableKey in visibleKeys }
+            val candidates = items.drop(lastVisible + 1)
+            val keptKeys = remoteHistory.filterRemoteReads(candidates).map { it.stableKey }.toSet()
+            val removedKeys = candidates.filterNot { it.stableKey in keptKeys }.map { it.stableKey }.toSet()
+            // The user may have scrolled while the database query was suspended.
+            val currentVisibleKeys = listState.layoutInfo.visibleItemsInfo
+                .map { it.key }
+                .toSet()
+            val protectedEnd = viewModel.displayItems.indexOfLast { it.stableKey in currentVisibleKeys }
+            for (index in viewModel.displayItems.lastIndex downTo protectedEnd + 1) {
+                if (viewModel.displayItems[index].stableKey in removedKeys) viewModel.displayItems.removeAt(index)
             }
+            viewModel.latestLoadedDisplayItems.value = remoteHistory.filterRemoteReads(viewModel.latestLoadedDisplayItems.value)
         }
     }
 
@@ -430,6 +485,15 @@ fun HomeScreen(
     // 按关键词屏蔽对话框
     var showBlockByKeywordsDialog by remember { mutableStateOf(false) }
     var feedToBlockByKeywords by remember { mutableStateOf<Pair<String, String?>?>(null) } // 二元组内容为标题和摘要。
+    val pageTurnTarget = rememberPageTurnTarget(
+        listState = listState,
+        enabled = isActive &&
+            !showAccountBottomSheet &&
+            !showCreateMenu &&
+            feedAuthorBlockRequest == null &&
+            !showBlockByKeywordsDialog &&
+            (!account.login || account.hasRequiredCookie),
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -637,7 +701,9 @@ fun HomeScreen(
                 PaginatedList(
                     items = viewModel.displayItems,
                     listState = listState,
-                    modifier = Modifier.testTag(HOME_FEED_LIST_TAG),
+                    modifier = Modifier
+                        .pageTurnViewportWithGuide(pageTurnTarget)
+                        .testTag(HOME_FEED_LIST_TAG),
                     contentPadding = PaddingValues(
                         top = scaffoldPadding.calculateTopPadding() + 8.dp,
                         bottom = innerPadding.calculateBottomPadding() + readingPlayerOverlayPadding,
@@ -796,7 +862,7 @@ fun HomeScreen(
                             else -> null
                         },
                         menuItems = { dismissMenu ->
-                            if (!isLiteVariant && feedKeywordExtractionAvailable) {
+                            if (feedKeywordExtractionAvailable) {
                                 DropdownMenuItem(
                                     text = { Text("按关键词屏蔽") },
                                     onClick = {

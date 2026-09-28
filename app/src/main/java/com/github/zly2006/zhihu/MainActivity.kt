@@ -24,9 +24,11 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -71,7 +73,12 @@ import com.github.zly2006.zhihu.theme.AndroidThemeSettings
 import com.github.zly2006.zhihu.theme.ZhihuTheme
 import com.github.zly2006.zhihu.ui.AndroidArticleNavigationHandoff
 import com.github.zly2006.zhihu.ui.AndroidZhihuMain
+import com.github.zly2006.zhihu.ui.components.LocalPageTurnDispatcher
+import com.github.zly2006.zhihu.ui.components.PageTurnCommand
+import com.github.zly2006.zhihu.ui.components.PageTurnDispatcher
+import com.github.zly2006.zhihu.ui.components.PageTurnFab
 import com.github.zly2006.zhihu.ui.components.getHighestQualityVideoUrl
+import com.github.zly2006.zhihu.ui.subscreens.PREF_VOLUME_KEY_PAGE_TURN
 import com.github.zly2006.zhihu.updater.UpdateManager
 import com.github.zly2006.zhihu.util.ContinuousUsageReminderManager
 import com.github.zly2006.zhihu.util.EmojiManager
@@ -82,10 +89,8 @@ import com.github.zly2006.zhihu.util.clearShareImageCache
 import com.github.zly2006.zhihu.util.clipboardManager
 import com.github.zly2006.zhihu.util.enableEdgeToEdgeCompat
 import com.github.zly2006.zhihu.util.telemetry
-import com.github.zly2006.zhihu.viewmodel.filter.ContentFilterManager
 import com.github.zly2006.zhihu.viewmodel.filter.androidKeywordSemanticMatcher
 import com.github.zly2006.zhihu.viewmodel.filter.androidKeywordWeightExtractor
-import com.github.zly2006.zhihu.viewmodel.filter.contentFilterSettings
 import com.github.zly2006.zhihu.viewmodel.filter.getContentFilterDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -102,8 +107,10 @@ class MainActivity : ComponentActivity() {
             .client
             .httpClient()
 
+    /** 主返回栈控制器，承载 MainTabs 主壳和单栏页面。 */
     lateinit var navController: NavHostController
     private lateinit var continuousUsageReminderManager: ContinuousUsageReminderManager
+    private val pageTurnDispatcher = PageTurnDispatcher()
     private var currentMainTabOpenFrom: String? = null
     var mainTabNavigationTarget by mutableStateOf<TopLevelDestination?>(null)
         private set
@@ -173,18 +180,6 @@ class MainActivity : ComponentActivity() {
         }
         settings.putLong(KEY_LAST_LAUNCH_TIMESTAMP, now)
 
-        // 应用启动时执行内容过滤数据库清理
-        lifecycleScope.launch {
-            try {
-                if (contentFilterSettings().enableContentFilter) {
-                    ContentFilterManager(getContentFilterDatabase(this@MainActivity).contentFilterDao()).cleanupOldData()
-                }
-                Log.i(TAG, "Content filter maintenance cleanup completed")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to perform content filter cleanup", e)
-            }
-        }
-
         // 初始化emoji管理器
         lifecycleScope.launch {
             try {
@@ -199,8 +194,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             navController = rememberNavController()
             ZhihuTheme {
-                Box(Modifier.semantics { testTagsAsResourceId = true }) {
-                    AndroidZhihuMain(navController = navController)
+                CompositionLocalProvider(LocalPageTurnDispatcher provides pageTurnDispatcher) {
+                    Box(Modifier.semantics { testTagsAsResourceId = true }) {
+                        AndroidZhihuMain(navController = navController)
+                        PageTurnFab(dispatcher = pageTurnDispatcher)
+                    }
                 }
             }
         }
@@ -276,6 +274,59 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    private var pageTurnLongPressConsumed = false
+
+    private fun pageTurnCommand(keyCode: Int): PageTurnCommand? = when (keyCode) {
+        KeyEvent.KEYCODE_PAGE_DOWN -> PageTurnCommand.PageDown
+        KeyEvent.KEYCODE_PAGE_UP -> PageTurnCommand.PageUp
+        KeyEvent.KEYCODE_VOLUME_DOWN ->
+            if (androidSettingsStore(this).getBoolean(PREF_VOLUME_KEY_PAGE_TURN, false)) {
+                PageTurnCommand.PageDown
+            } else {
+                null
+            }
+        KeyEvent.KEYCODE_VOLUME_UP ->
+            if (androidSettingsStore(this).getBoolean(PREF_VOLUME_KEY_PAGE_TURN, false)) {
+                PageTurnCommand.PageUp
+            } else {
+                null
+            }
+        else -> null
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val command = pageTurnCommand(event.keyCode) ?: return super.dispatchKeyEvent(event)
+        if (!pageTurnDispatcher.hasActiveTarget) return super.dispatchKeyEvent(event)
+
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                when {
+                    event.isLongPress -> {
+                        pageTurnLongPressConsumed = true
+                        pageTurnDispatcher.dispatch(
+                            if (command == PageTurnCommand.PageDown) {
+                                PageTurnCommand.JumpToBottom
+                            } else {
+                                PageTurnCommand.JumpToTop
+                            },
+                        )
+                    }
+                    event.repeatCount == 0 -> {
+                        pageTurnLongPressConsumed = false
+                        true
+                    }
+                    else -> true
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                val consumed = pageTurnLongPressConsumed || pageTurnDispatcher.dispatch(command)
+                pageTurnLongPressConsumed = false
+                consumed
+            }
+            else -> super.dispatchKeyEvent(event)
+        }
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         if (hasFocus) {
             if (!handleIntentData(intent)) {
@@ -332,20 +383,47 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
+    /**
+     * 通过主返回栈打开页面；popup 可替换当前外部跳转页面。
+     *
+     * @param route 要打开的页面
+     * @param popup 是否替换当前外部跳转页面
+     */
     fun navigate(route: NavDestination, popup: Boolean = false) {
+        navigate(route, navController, popup)
+    }
+
+    /**
+     * 通过 [targetController] 打开页面；分屏时该控制器属于右侧详情栏。
+     *
+     * @param route 要在目标栏中打开的页面
+     * @param targetController 持有目标页面返回栈的控制器
+     */
+    fun navigateIn(route: NavDestination, targetController: NavHostController) {
+        navigate(route, targetController, popup = false)
+    }
+
+    /**
+     * 通过指定返回栈打开页面。主控制器承载主壳和列表，详情控制器承载大屏右侧内容。
+     */
+    private fun navigate(
+        route: NavDestination,
+        targetController: NavHostController,
+        popup: Boolean,
+    ) {
         if (route is CommentHolder) {
             AndroidArticleNavigationHandoff.prepareComment(route)
-            navigate(route.article, popup)
+            navigate(route.article, targetController, popup)
             return
         }
         AndroidArticleNavigationHandoff.clearCommentUnless(route)
-        preparePendingContentOpen(route)
+        preparePendingContentOpen(route, targetController)
         history.add(route)
         if (route is Video) {
             val current = runCatching {
-                navController.currentBackStackEntry?.toRoute<Article>()
+                targetController.currentBackStackEntry?.toRoute<Article>()
             }.getOrNull() ?: runCatching {
-                navController.currentBackStackEntry?.toRoute<Question>()
+                targetController.currentBackStackEntry?.toRoute<Question>()
             }.getOrNull()
             if (current == null) {
                 androidUserMessageSink(this).showShortMessage("无法打开视频：未知的内容类型")
@@ -383,9 +461,12 @@ class MainActivity : ComponentActivity() {
             navigateToMainTabs()
             return
         }
-        navController.navigate(route) {
+        targetController.navigate(route) {
+            // A secondary NavHost scopes content ViewModels by back-stack entry. Reusing
+            // the same Article destination here keeps the old entry-scoped article alive
+            // when a different feed item is selected.
+            launchSingleTop = popup
             if (popup) {
-                launchSingleTop = true
                 popUpTo(MainTabs) {
                     // clear the back stack and viewModels
                     saveState = true
@@ -394,7 +475,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun preparePendingContentOpen(target: NavDestination) {
+    /** [sourceController] 提供触发导航的来源页面，用于记录内容打开来源。 */
+    private fun preparePendingContentOpen(
+        target: NavDestination,
+        sourceController: NavHostController,
+    ) {
         val openFrom = if (
             runCatching { navController.currentBackStackEntry?.toRoute<MainTabs>() }.getOrNull() != null
         ) {
@@ -402,7 +487,7 @@ class MainActivity : ComponentActivity() {
         } else {
             null
         }
-            ?: ContentOpenEventSupport.inferOpenFrom(currentContentOpenSource(), target)
+            ?: ContentOpenEventSupport.inferOpenFrom(currentContentOpenSource(sourceController), target)
         AndroidArticleNavigationHandoff.prepareContentOpen(target, openFrom)
     }
 
@@ -426,8 +511,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun currentContentOpenSource(): NavDestination? {
-        val currentEntry = navController.currentBackStackEntry
+    /** 从指定返回栈的当前页面读取内容打开来源，支持右侧详情栏。 */
+    private fun currentContentOpenSource(controller: NavHostController = navController): NavDestination? {
+        val currentEntry = controller.currentBackStackEntry
         return runCatching {
             currentEntry?.toRoute<Article>()
         }.getOrNull() ?: runCatching {

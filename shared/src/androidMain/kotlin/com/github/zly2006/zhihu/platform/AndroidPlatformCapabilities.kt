@@ -83,13 +83,13 @@ actual val isNative: Boolean = false
 
 actual val isAigcVoteSupported: Boolean = true
 
-actual val isBlocklistNlpSupported: Boolean = true
-
-actual val isSentenceSimilaritySupported: Boolean = true
-
 actual val isArticleHtmlExportSupported: Boolean = true
 
 actual val isArticleImageExportSupported: Boolean = true
+
+actual val isPageTurnSupported: Boolean = true
+
+actual val isAnswerSwipeSupported: Boolean = true
 
 @Composable
 actual fun rememberSystemUrlOpener(): SystemUrlOpener {
@@ -267,14 +267,6 @@ actual fun rememberUserMessageSink(): UserMessageSink {
     val context = LocalContext.current.applicationContext
     return remember(context) { androidUserMessageSink(context) }
 }
-
-@Composable
-actual fun rememberIsLiteVariant(): Boolean {
-    val context = LocalContext.current
-    return remember(context) { isAndroidLiteVariantPackageName(context.packageName) }
-}
-
-internal fun isAndroidLiteVariantPackageName(packageName: String): Boolean = packageName.endsWith(".lite")
 
 @Composable
 actual fun PlatformBackHandler(
