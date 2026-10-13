@@ -33,8 +33,21 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Test Markdown list and table layout
+        run: xvfb-run -a ./gradlew :markdown-renderer:jvmTest --tests 'com.hrm.markdown.renderer.MarkdownListTableLayoutTest'
+
       - name: Build Lite Release APK
         run: ./gradlew assembleLiteRelease
+
+      - name: Upload Markdown layout test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-layout-test-reports
+          path: |
+            third_party/markdown/markdown-renderer/build/test-results/jvmTest/
+            third_party/markdown/markdown-renderer/build/reports/tests/jvmTest/
+          if-no-files-found: ignore
 
       - name: Upload Android Lite APK
         uses: actions/upload-artifact@v4
